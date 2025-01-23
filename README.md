@@ -21,7 +21,7 @@ The purpose of this Analysis is to preemptively manage the expected increase in 
 - Comprehensive Data Integration - Merged county-level environmental data with detailed house-level data.
 - County Grouping and Data Summarization - Organized and summarized weather data across entire counties, focusing on total humidity and temperature.
 
-## Predictive Models used:
+## Predictive Models Used:
 - Linear Regression Model
 - XGBoost Model
 
