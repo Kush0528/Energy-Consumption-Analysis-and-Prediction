@@ -8,6 +8,19 @@ The purpose of this Analysis is to preemptively manage the expected increase in 
 - Predictive Modeling for Demand Forecasting 
 - Interactive Data Visualization with Shiny Apps 
 
+### Datasets Used:
+- Static House Data
+- Energy Usage Data
+- Weather Data
+
+## Data Processing Steps:
+- House Classification - Classified houses based on their built area '<900' and climate zone = 'Hot-Humid'.
+- Date Formatting - Standardized the format of the date column into a datetime format.
+- Data Consolidation - Merged the Sample House Data (SHD) with the Energy Data (ED) using the building data as a linkage key.
+- County-Wide Data Aggregation - Compiled and aggregated total humidity and temperature data at the county level.
+- Comprehensive Data Integration - Merged county-level environmental data with detailed house-level data.
+- County Grouping and Data Summarization - Organized and summarized weather data across entire counties, focusing on total humidity and temperature.
+
 ### Predictive models used:
 - Linear Regression Model
 - XGBoost Model
