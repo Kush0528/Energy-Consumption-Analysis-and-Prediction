@@ -1,0 +1,428 @@
+
+
+```{r}
+# Load necessary libraries
+library(readr)
+library(arrow)
+library(caret)
+library(data.table)
+library(magrittr)
+library(dplyr)
+library(tidyverse)
+```
+
+```{r}
+# URLs for the static house, weather, and energy usage datasets.
+static_data_url <- "https://intro-datascience.s3.us-east-2.amazonaws.com/SC-data/static_house_info.parquet"
+weather_data_url <- "https://intro-datascience.s3.us-east-2.amazonaws.com/SC-data/weather/2023-weather-data/G4500010.csv"
+energy_usage_url <- "https://intro-datascience.s3.us-east-2.amazonaws.com/SC-data/2023-houseData/102063.parquet"
+metadata_url <- "https://intro-datascience.s3.us-east-2.amazonaws.com/SC-data/data_dictionary.csv"
+# Reading the datasets
+df_static <- read_parquet(static_data_url)
+df_weather <- read_csv(weather_data_url)
+df_energy <- read_parquet(energy_usage_url)
+df_metadata <- read_csv(metadata_url)
+```
+```{r}
+#subsetting the required columns from the house data
+static_subset_data <- df_static[c("bldg_id","in.county","in.sqft", "in.ducts","in.geometry_building_type_acs" , "in.geometry_stories", "in.geometry_wall_type" ,"in.geometry_story_bin"  , "in.geometry_wall_exterior_finish" ,"in.hvac_cooling_type","in.insulation_wall" ,"in.lighting","in.natural_ventilation" ,"in.occupants","in.orientation","in.roof_material" ,"in.vacancy_status" ,"in.vintage_acs","in.windows","in.building_america_climate_zone" )]
+static_subset_data
+```
+
+```{r}
+#Applying the filter criteria using "in.sqft" and "in.building_america_climate_zone columns"
+houses_sqft_zone <- static_subset_data %>% filter(in.sqft < 900 & in.building_america_climate_zone =="Hot-Humid" )
+houses_sqft_zone
+```
+
+
+```{r}
+# Using unique() function to get all unique values of bldg_id
+all_bldg_ids <- unique(houses_sqft_zone$bldg_id)
+
+# Printing the extracted unique building IDs
+print(all_bldg_ids)
+
+```
+
+
+
+```{r}
+#Storing the building ids in "bldg_ids"
+bldg_ids <- c("670", "4561", "17496", "24120", "24918", "29895", "32115", "36877", "39235", "43131", "43309", "55360", "62771", "67881", "91114", "103686", "126042", "136725", "139608", "144853", "153528", "165581", "179042", "180931", "185397", "186846", "196102", "197153", "197167", "212450", "228607", "247057", "266455", "272780", "278750", "281994", "282932", "290839", "291688", "293273", "306901", "307298", "313003", "320346", "365040", "366064", "369817", "378367", "379073", "379141", "384753", "387224", "387597", "399743", "400010", "406547", "407645", "409139", "419219", "433435", "439684", "450950", "456936", "458499", "461249", "471199", "474709", "475174", "483565", "488726", "491499", "501618", "522537", "531426", "534961", "536353", "537775", "544553")
+
+# Initialize an empty list to store results for each building
+all_building_consumption <- list()
+#Creating a for loop
+for (bldg_id in bldg_ids) {
+  # Constructing URL for energy usage data for the current building ID
+  energy_usage_url <- paste0("https://intro-datascience.s3.us-east-2.amazonaws.com/SC-data/2023-houseData/", bldg_id, ".parquet")
+  
+  # Reading energy usage data for the current building into df_energy
+  df_energy <- read_parquet(energy_usage_url)
+  
+  # Selecting the necessary columns for energy consumption
+  selected_columns <- c(
+    "out.electricity.cooling.energy_consumption",
+    "out.electricity.refrigerator.energy_consumption",
+    "out.electricity.clothes_washer.energy_consumption",
+    "out.electricity.dishwasher.energy_consumption",
+    "out.electricity.clothes_dryer.energy_consumption",
+    "out.electricity.hot_water.energy_consumption",
+    "out.natural_gas.hot_water.energy_consumption",
+    "out.propane.hot_water.energy_consumption",
+    "out.electricity.lighting_interior.energy_consumption",
+    "out.electricity.plug_loads.energy_consumption",
+    "out.natural_gas.heating.energy_consumption",
+    "out.propane.heating.energy_consumption"
+  )
+  
+  # Subsetting the energy data to selected columns
+  energy_subset <- df_energy[, selected_columns]
+  
+  # Calculating per hour consumption for the current building
+  energy_subset$per_hour_consumption <- rowSums(energy_subset, na.rm = TRUE)
+  
+  # Combining time and per_hour_consumption columns
+  hr_consumption_data <- data.frame(time = df_energy$time, per_hour_consumption = energy_subset$per_hour_consumption)
+  hr_consumption_data
+  # Converting to data frame
+  hr_consumption_data <- as.data.frame(hr_consumption_data)
+  
+  # Rename columns
+  colnames(hr_consumption_data) <- c("time", "per_hour_consumption")
+  
+  # Grouping consumption data into 6-hour intervals and summarize
+  summarized_data <- hr_consumption_data %>%
+    mutate(group_id = rep(1:(n() %/% 6 + 1), each = 6, length.out = n())) %>%
+    group_by(group_id) %>%
+    summarise(
+      consumption_per_6hrs = sum(per_hour_consumption),
+      date_time = first(time) 
+    )
+  
+  # Storing summarized data for the current building
+  all_building_consumption[[bldg_id]] <- summarized_data
+}
+
+```
+
+
+```{r}
+all_building_consumption
+```
+```{r}
+for (bldg_id in names(all_building_consumption)) {
+  # Replace 'group_id' with the building ID "bldg_id" for each dataframe
+  all_building_consumption[[bldg_id]]$group_id <- as.integer(bldg_id)
+}
+all_building_consumption
+```
+
+```{r}
+#Removing unnecessary elements.
+all_building_consumption<- all_building_consumption[-79]
+combined_consumption_dataset <- bind_rows(all_building_consumption)
+combined_consumption_dataset <- combined_consumption_dataset %>%
+                     rename(bldg_id = group_id)
+combined_consumption_dataset
+#viewing the dataset
+view(combined_consumption_dataset)
+```
+```{r}
+
+# Converting the "date_time" column to only "date" format
+combined_consumption_dataset$date <- as.Date(combined_consumption_dataset$date_time)
+
+# Removing the extra date_time column as it is not needed.
+combined_consumption_dataset <- combined_consumption_dataset[, -which(names(combined_consumption_dataset) == "date_time")]
+
+# Printing the modified dataset
+print(combined_consumption_dataset)
+
+```
+
+
+```{r}
+
+# Using unique() function to get all unique county codes.
+all_county_codes <- unique(houses_sqft_zone$in.county)
+
+# Printing the extracted unique county codes.
+print(all_county_codes)
+
+```
+
+
+```{r}
+#Reading the unique county codes into "county_codes".
+county_codes <- c( "G4500350", "G4500510", "G4500130", "G4500190", "G4500150", "G4500430", "G4500110", "G4500290", "G4500090", "G4500490") 
+# Initialize an empty list to store results for each county.
+all_county_weather <- list()
+
+# Iterating over each county code
+for (county_code in county_codes) {
+  # Constructing URL for weather data for the current county
+  weather_url <- paste0("https://intro-datascience.s3.us-east-2.amazonaws.com/SC-data/weather/2023-weather-data/", county_code, ".csv")
+  
+  # Reading the CSV file from the URL into "weather_data"
+  weather_data <- read_csv(weather_url)
+  
+  # Selecting the required columns from "weather_data"
+  subset_data <- weather_data %>%
+    select(`Dry Bulb Temperature [°C]`, `Wind Speed [m/s]`, `Relative Humidity [%]`, date_time)
+  
+  # Adding an index to group every 6 rows
+  subset_data <- subset_data %>%
+    mutate(group_index = ceiling(row_number() / 6))
+  
+  # Calculating mean for each group
+  mean_data <- subset_data %>%
+    group_by(group_index) %>%
+    summarise(
+      Mean_Temperature = mean(`Dry Bulb Temperature [°C]`, na.rm = TRUE),
+      Mean_Wind_Speed = mean(`Wind Speed [m/s]`, na.rm = TRUE),
+      Mean_Relative_Humidity = mean(`Relative Humidity [%]`, na.rm = TRUE),
+      date_time = first(date_time) 
+    ) 
+  # Storing mean weather data for the current county
+  all_county_weather[[county_code]] <- mean_data
+}
+
+print(all_county_weather)
+```
+
+```{r}
+
+# List of county names
+county_names <- c("G4500350", "G4500510", "G4500130", "G4500190", "G4500150", 
+                   "G4500430", "G4500110", "G4500290", "G4500090", "G4500490")
+
+# Loop through each dataset in the list
+for (i in seq_along(all_county_weather)) {
+  # Extract the current dataset
+  current_data <- all_county_weather[[i]]
+  
+  # Replace the group_index column with the corresponding county name
+  current_data$group_index <- county_names[i]
+  
+  # Update the dataset in the list
+  all_county_weather[[i]] <- current_data
+}
+
+# Updated list with group_index replaced by county names
+all_county_weather
+```
+
+
+```{r}
+# Combine all datasets in the list into a single dataframe
+combined_weather_data <- bind_rows(all_county_weather)
+# Loop through each dataset in the list
+for (i in seq_along(all_county_weather)) {
+  # Rename the "group_index" column to "in.county"
+  all_county_weather[[i]] <- rename(all_county_weather[[i]], in.county = group_index)
+}
+# Printing and Viewing the combined dataset
+print(combined_weather_data)
+view(combined_weather_data)
+```
+
+
+```{r}
+
+
+# Converting the "date_time" column to Date class
+combined_weather_data$date_time <- as.Date(combined_weather_data$date_time)
+
+# Viewing the modified dataset
+combined_weather_data
+
+
+
+```
+
+```{r}
+library(dplyr)
+# Renaming the column name
+combined_weather_data <- combined_weather_data %>%
+  rename(date = date_time)
+
+# Viewing the modified dataset
+combined_weather_data
+
+```
+
+```{r}
+#merging house data with the energy data
+merged_dataset <- merge(combined_consumption_dataset, houses_sqft_zone, by = "bldg_id", all.x = TRUE)
+merged_dataset
+#Printing the first 6 rows of the merged dataset.
+head(merged_dataset)
+```
+
+```{r}
+#Merging all the three datasets
+final_merged_dataset <- merge(merged_dataset, combined_weather_data, by = "date", all.x = TRUE)
+final_merged_dataset
+
+```
+
+#Shiny app for current total energy consumption
+```{r}
+# Define UI for the Shiny app
+library(shiny)
+library(shinydashboard)
+library(ggplot2)
+library(DT)
+library(dplyr)
+
+ui <- dashboardPage(
+  dashboardHeader(title = "Total Energy Consumption"),
+  dashboardSidebar(
+    HTML('<p>This application provides an interactive exploration of the energy consumption. </p>'),
+    selectInput("x_var", "Select X Variable", names(final_merged_dataset)),
+    selectInput("y_var", "Select Y Variable", names(final_merged_dataset)),
+    checkboxGroupInput("color_var", "Select Color Variable", names(final_merged_dataset)),
+    sliderInput("obs", "Number of Observations to Show", min = 1, max = nrow(final_merged_dataset), value = 10)
+  ),
+  dashboardBody(
+    fluidRow(
+      box(
+        title = "Summary",
+        textOutput("summary_text")
+      )
+    ),
+    br(),
+    fluidRow(
+      box(
+        title = "Scatter Plot",
+        plotOutput("scatterplot")
+      )
+    ),
+    br(),
+    fluidRow(
+      box(
+        title = "Table",
+        DTOutput('data_table')  # Corrected name to match the server output
+      )
+    )
+  )
+)
+ 
+# Define the server for the Shiny app
+server <- function(input, output) {
+  output$summary_text <- renderText({
+    paste("Total Energy: ", sum(final_merged_dataset$consumption_per_6hrs))
+  })
+  output$scatterplot <- renderPlot({
+    sample_data <- final_merged_dataset[sample(1:nrow(final_merged_dataset), input$obs), ]
+    ggplot(sample_data, aes_string(x = input$x_var, y = input$y_var, color = input$color_var)) +
+      geom_point() +
+      labs(title = paste("Scatter Plot of", input$y_var, "vs", input$x_var), x = input$x_var, y = input$y_var)
+  })
+  output$data_table <- renderDT(
+    final_merged_dataset %>%
+      select(-lat, -lon) %>%
+      datatable()
+  )
+}
+ 
+# Run the Shiny app
+shinyApp(ui, server)
+
+```
+
+#Shiny app for predicted total energy consumption
+```{r}
+# Define UI for the Shiny app
+library(shiny)
+library(shinydashboard)
+library(DT)
+library(dplyr)
+
+ui <- dashboardPage(
+  dashboardHeader(title = "Predicted Energy Consumption"),
+  dashboardSidebar(
+    HTML('<p>This application provides an interactive exploration of the predicted energy consumption. </p>')
+  ),
+  dashboardBody(
+    fluidRow(
+      box(
+        title = "Summary",
+        textOutput("summary_text")
+      )
+    ),
+    br(),
+    fluidRow(
+      box(
+        title = "Predicted Energy Consumption Plot",
+        # Display the plot as an image
+        img(src = "predicted_energy_plot.png", width = "100%")
+      )
+    ),
+    br(),
+    fluidRow(
+      box(
+        title = "Updated Dataset",
+        DTOutput('updated_data_table')
+      )
+    )
+  )
+)
+
+# Define the server for the Shiny app
+server <- function(input, output) {
+  # Calculate predicted energy consumption and store it in the new_final_df
+  # Increase the temperatures with 5 degrees
+   set.seed(123)
+    new_final_df <- final_merged_dataset %>%
+    mutate(Mean_Temperature = Mean_Temperature + 5)
+  
+  # Select only the numeric features for the prediction
+  # Excluding the target variable
+  numeric_features <- new_final_df %>%
+    select_if(is.numeric) %>%
+    select(-consumption_per_6hrs) 
+  
+  # Ensure that the columns in the new data frame are in the same order as the training data
+  column_order <- names(trainSet %>% select_if(is.numeric) %>% select(-consumption_per_6hrs))
+  numeric_features <- numeric_features[column_order]
+  
+  # Predict the total energy using the XGBoost model
+  predicted_energy <- predict(model_xgb, as.matrix(numeric_features))
+  
+  # Storing predicted total energy into new_final_df
+  new_final_df$predicted_consumption_per_6hrs <- predicted_energy
+  
+  # Output summary text
+  output$summary_text <- renderText({
+    paste("Total Predicted Energy: ", sum(predicted_energy))
+  })
+  
+  # Updated dataset with predicted consumption
+  output$updated_data_table <- renderDT(
+    new_final_df %>%
+      select(-lat, -lon) %>%
+      datatable()
+  )
+  
+  # Plotting predicted energy consumption.
+  output$predicted_energy_plot <- renderPlot({
+    p <- ggplot(new_final_df, aes(x = date, y = predicted_consumption_per_6hrs)) +
+           geom_line() +
+           labs(title = "Predicted Energy Consumption", x = "Date", y = "Energy Consumption")
+    
+    # Saving the plot as PNG
+    ggsave("predicted_energy_plot.png", plot = p, device = "png")
+    
+    # Return NULL to prevent rendering in the app
+    return(NULL)
+  })
+}
+
+# Run the Shiny app
+shinyApp(ui, server)
+
+```
+

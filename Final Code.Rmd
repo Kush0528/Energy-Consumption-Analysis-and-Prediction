@@ -1,0 +1,383 @@
+
+```{r}
+# Loading necessary libraries
+library(readr)
+library(arrow)
+library(caret)
+library(data.table)
+library(magrittr)
+library(dplyr)
+library(tidyverse)
+```
+
+```{r}
+# URLs for the static house, weather, and energy usage datasets.
+static_data_url <- "https://intro-datascience.s3.us-east-2.amazonaws.com/SC-data/static_house_info.parquet"
+weather_data_url <- "https://intro-datascience.s3.us-east-2.amazonaws.com/SC-data/weather/2023-weather-data/G4500010.csv"
+energy_usage_url <- "https://intro-datascience.s3.us-east-2.amazonaws.com/SC-data/2023-houseData/102063.parquet"
+metadata_url <- "https://intro-datascience.s3.us-east-2.amazonaws.com/SC-data/data_dictionary.csv"
+# Reading the datasets
+df_static <- read_parquet(static_data_url)
+df_weather <- read_csv(weather_data_url)
+df_energy <- read_parquet(energy_usage_url)
+df_metadata <- read_csv(metadata_url)
+```
+```{r}
+#subsetting the required columns from the house data
+static_subset_data <- df_static[c("bldg_id","in.county","in.sqft", "in.ducts","in.geometry_building_type_acs" , "in.geometry_stories", "in.geometry_wall_type" ,"in.geometry_story_bin"  , "in.geometry_wall_exterior_finish" ,"in.hvac_cooling_type","in.insulation_wall" ,"in.lighting","in.natural_ventilation" ,"in.occupants","in.orientation","in.roof_material" ,"in.vacancy_status" ,"in.vintage_acs","in.windows","in.building_america_climate_zone" )]
+static_subset_data
+```
+
+```{r}
+#Applying the filter criteria using "in.sqft" and "in.building_america_climate_zone columns"
+houses_sqft_zone <- static_subset_data %>% filter(in.sqft < 900 & in.building_america_climate_zone =="Hot-Humid" )
+houses_sqft_zone
+```
+
+
+```{r}
+# Using unique() function to get all unique values of bldg_id
+all_bldg_ids <- unique(houses_sqft_zone$bldg_id)
+
+# Printing the extracted unique building IDs
+print(all_bldg_ids)
+
+```
+
+
+
+```{r}
+#Storing the building ids in "bldg_ids"
+bldg_ids <- c("670", "4561", "17496", "24120", "24918", "29895", "32115", "36877", "39235", "43131", "43309", "55360", "62771", "67881", "91114", "103686", "126042", "136725", "139608", "144853", "153528", "165581", "179042", "180931", "185397", "186846", "196102", "197153", "197167", "212450", "228607", "247057", "266455", "272780", "278750", "281994", "282932", "290839", "291688", "293273", "306901", "307298", "313003", "320346", "365040", "366064", "369817", "378367", "379073", "379141", "384753", "387224", "387597", "399743", "400010", "406547", "407645", "409139", "419219", "433435", "439684", "450950", "456936", "458499", "461249", "471199", "474709", "475174", "483565", "488726", "491499", "501618", "522537", "531426", "534961", "536353", "537775", "544553")
+
+# Initialize an empty list to store results for each building
+all_building_consumption <- list()
+#Creating a for loop
+for (bldg_id in bldg_ids) {
+  # Constructing URL for energy usage data for the current building ID
+  energy_usage_url <- paste0("https://intro-datascience.s3.us-east-2.amazonaws.com/SC-data/2023-houseData/", bldg_id, ".parquet")
+  
+  # Reading energy usage data for the current building into df_energy
+  df_energy <- read_parquet(energy_usage_url)
+  
+  # Selecting the necessary columns for energy consumption
+  selected_columns <- c(
+    "out.electricity.cooling.energy_consumption",
+    "out.electricity.refrigerator.energy_consumption",
+    "out.electricity.clothes_washer.energy_consumption",
+    "out.electricity.dishwasher.energy_consumption",
+    "out.electricity.clothes_dryer.energy_consumption",
+    "out.electricity.hot_water.energy_consumption",
+    "out.natural_gas.hot_water.energy_consumption",
+    "out.propane.hot_water.energy_consumption",
+    "out.electricity.lighting_interior.energy_consumption",
+    "out.electricity.plug_loads.energy_consumption",
+    "out.natural_gas.heating.energy_consumption",
+    "out.propane.heating.energy_consumption"
+  )
+  
+  # Subsetting the energy data to selected columns
+  energy_subset <- df_energy[, selected_columns]
+  
+  # Calculating per hour consumption for the current building
+  energy_subset$per_hour_consumption <- rowSums(energy_subset, na.rm = TRUE)
+  
+  # Combining time and per_hour_consumption columns
+  hr_consumption_data <- data.frame(time = df_energy$time, per_hour_consumption = energy_subset$per_hour_consumption)
+  hr_consumption_data
+  # Converting to data frame
+  hr_consumption_data <- as.data.frame(hr_consumption_data)
+  
+  # Rename columns
+  colnames(hr_consumption_data) <- c("time", "per_hour_consumption")
+  
+  # Grouping consumption data into 6-hour intervals and summarize
+  summarized_data <- hr_consumption_data %>%
+    mutate(group_id = rep(1:(n() %/% 6 + 1), each = 6, length.out = n())) %>%
+    group_by(group_id) %>%
+    summarise(
+      consumption_per_6hrs = sum(per_hour_consumption),
+      date_time = first(time) 
+    )
+  
+  # Storing summarized data for the current building
+  all_building_consumption[[bldg_id]] <- summarized_data
+}
+
+```
+
+```{r}
+all_building_consumption
+```
+```{r}
+for (bldg_id in names(all_building_consumption)) {
+  # Replace 'group_id' with the building ID "bldg_id" for each dataframe
+  all_building_consumption[[bldg_id]]$group_id <- as.integer(bldg_id)
+}
+all_building_consumption
+```
+
+```{r}
+#Removing unnecessary elements.
+all_building_consumption<- all_building_consumption[-79]
+combined_consumption_dataset <- bind_rows(all_building_consumption)
+combined_consumption_dataset <- combined_consumption_dataset %>%
+                     rename(bldg_id = group_id)
+combined_consumption_dataset
+#viewing the dataset
+view(combined_consumption_dataset)
+```
+```{r}
+
+# Converting the "date_time" column to only "date" format
+combined_consumption_dataset$date <- as.Date(combined_consumption_dataset$date_time)
+
+# Removing the extra date_time column as it is not needed.
+combined_consumption_dataset <- combined_consumption_dataset[, -which(names(combined_consumption_dataset) == "date_time")]
+
+# Printing the modified dataset
+print(combined_consumption_dataset)
+
+```
+
+
+```{r}
+
+# Using unique() function to get all unique county codes.
+all_county_codes <- unique(houses_sqft_zone$in.county)
+
+# Printing the extracted unique county codes.
+print(all_county_codes)
+
+```
+
+
+```{r}
+#Reading the unique county codes into "county_codes".
+county_codes <- c( "G4500350", "G4500510", "G4500130", "G4500190", "G4500150", "G4500430", "G4500110", "G4500290", "G4500090", "G4500490") 
+# Initialize an empty list to store results for each county.
+all_county_weather <- list()
+
+# Iterating over each county code
+for (county_code in county_codes) {
+  # Constructing URL for weather data for the current county
+  weather_url <- paste0("https://intro-datascience.s3.us-east-2.amazonaws.com/SC-data/weather/2023-weather-data/", county_code, ".csv")
+  
+  # Reading the CSV file from the URL into "weather_data"
+  weather_data <- read_csv(weather_url)
+  
+  # Selecting the required columns from "weather_data"
+  subset_data <- weather_data %>%
+    select(`Dry Bulb Temperature [°C]`, `Wind Speed [m/s]`, `Relative Humidity [%]`, date_time)
+  
+  # Adding an index to group every 6 rows
+  subset_data <- subset_data %>%
+    mutate(group_index = ceiling(row_number() / 6))
+  
+  # Calculating mean for each group
+  mean_data <- subset_data %>%
+    group_by(group_index) %>%
+    summarise(
+      Mean_Temperature = mean(`Dry Bulb Temperature [°C]`, na.rm = TRUE),
+      Mean_Wind_Speed = mean(`Wind Speed [m/s]`, na.rm = TRUE),
+      Mean_Relative_Humidity = mean(`Relative Humidity [%]`, na.rm = TRUE),
+      date_time = first(date_time) 
+    ) 
+  # Storing mean weather data for the current county
+  all_county_weather[[county_code]] <- mean_data
+}
+
+print(all_county_weather)
+```
+
+```{r}
+
+# List of county names
+county_names <- c("G4500350", "G4500510", "G4500130", "G4500190", "G4500150", 
+                   "G4500430", "G4500110", "G4500290", "G4500090", "G4500490")
+
+# Loop through each dataset in the list
+for (i in seq_along(all_county_weather)) {
+  # Extract the current dataset
+  current_data <- all_county_weather[[i]]
+  
+  # Replace the group_index column with the corresponding county name
+  current_data$group_index <- county_names[i]
+  
+  # Update the dataset in the list
+  all_county_weather[[i]] <- current_data
+}
+
+# Updated list with group_index replaced by county names
+all_county_weather
+```
+
+```{r}
+# Combine all datasets in the list into a single dataframe
+combined_weather_data <- bind_rows(all_county_weather)
+# Loop through each dataset in the list
+for (i in seq_along(all_county_weather)) {
+  # Rename the "group_index" column to "in.county"
+  all_county_weather[[i]] <- rename(all_county_weather[[i]], in.county = group_index)
+}
+# Printing and Viewing the combined dataset
+print(combined_weather_data)
+view(combined_weather_data)
+```
+
+```{r}
+
+
+# Converting the "date_time" column to Date class
+combined_weather_data$date_time <- as.Date(combined_weather_data$date_time)
+
+# Viewing the modified dataset
+combined_weather_data
+
+
+
+```
+
+```{r}
+library(dplyr)
+# Renaming the column name
+combined_weather_data <- combined_weather_data %>%
+  rename(date = date_time)
+
+# Viewing the modified dataset
+combined_weather_data
+
+```
+
+```{r}
+#merging house data with the energy data
+merged_dataset <- merge(combined_consumption_dataset, houses_sqft_zone, by = "bldg_id", all.x = TRUE)
+merged_dataset
+#Printing the first 6 rows of the merged dataset.
+head(merged_dataset)
+```
+
+
+```{r}
+#Merging all the three datasets
+final_merged_dataset <- merge(merged_dataset, combined_weather_data, by = "date", all.x = TRUE)
+final_merged_dataset
+#Downloading the csv file 
+write.csv(final_merged_dataset, file = "final_all_merged.csv", row.names = FALSE)
+```
+```{r}
+#Looking for the unique values.
+all_county_codes_final <- unique(final_merged_dataset$in.county.x)
+#Reading the csv file into "final_merged_dataset"
+final_merged_dataset<- read.csv("final_all_merged.csv")
+```
+
+
+```{r}
+#Viewing the column names in final merged dataset.
+colnames((final_merged_dataset))
+```
+
+```{r}
+# Variables to convert to factors
+factor_vars <- c(
+ "date",                             "bldg_id" ,                         "consumption_per_6hrs"  ,          
+"in.county.x",                     "in.sqft" ,                         "in.ducts"    ,                    
+"in.geometry_building_type_acs",    "in.geometry_stories"    ,          "in.geometry_wall_type",           
+ "in.geometry_story_bin" ,           "in.geometry_wall_exterior_finish" ,"in.hvac_cooling_type" ,           
+"in.insulation_wall"  ,             "in.lighting",                      "in.natural_ventilation" ,         
+"in.occupants" ,                    "in.orientation" ,                  "in.roof_material" ,              
+"in.vacancy_status" ,               "in.vintage_acs" ,                  "in.windows" ,                     
+"in.building_america_climate_zone", "in.county.y"   ,                   "Mean_Temperature"  ,              
+"Mean_Wind_Speed"  ,                "Mean_Relative_Humidity" 
+)
+ 
+# Convert specified variables to factors
+final_merged_dataset[factor_vars] <- lapply(final_merged_dataset[factor_vars], as.factor)
+ 
+# Convert factors to numeric
+final_merged_dataset[factor_vars] <- lapply(final_merged_dataset[factor_vars], as.numeric)
+ 
+# Run correlation matrix
+correlation_data <- cor(final_merged_dataset[, factor_vars], use = "complete.obs")
+ 
+# Print correlation matrix
+print(correlation_data)
+```
+
+#PREDICTIVE MODELING
+
+# 1. LR MODEL
+
+```{r}
+library(caret)
+library(dplyr)
+
+# Reading the CSV file into "grouped_data".
+grouped_data <- read.csv("final_all_merged.csv") 
+
+set.seed(123)
+
+# Check the number of rows in grouped_data
+print(nrow(grouped_data))
+
+# Splitting the data into a train-test data using a 70-30 split
+trainList <- createDataPartition(y = final_merged_dataset$consumption_per_6hrs, p = 0.70, list = FALSE)
+trainSet <- final_merged_dataset[trainList,]
+testSet <- final_merged_dataset[-trainList,]
+
+# Multiple Linear model
+linear_model <- lm(consumption_per_6hrs ~ . , data = trainSet)
+summary(linear_model)
+
+# Predictions using the trained linear regression model
+predictions <- predict(linear_model, newdata = testSet)
+
+# Actual total energy values of test data
+actual_values <- testSet$consumption_per_6hrs
+# Obtain the R-Squared error.
+R_squared <- 1 - (sum((actual_values - predictions)^2) / sum((actual_values - mean(actual_values))^2))
+cat ("R-squared (R):", R_squared, "In")
+cat ("Accuracy of Linear regression model is : ", R_squared * 180, "In")
+
+```
+
+
+
+# 2. XG BOOST - Using Hyperparameters 
+
+```{r}
+# Convert logical columns to numeric for both "trainSet" and "testSet"
+trainSet[] <- lapply(trainSet, function(x) if(is.logical(x)) as.numeric(x) else x)
+testSet[] <- lapply(testSet, function(x) if(is.logical(x)) as.numeric(x) else x)
+
+# Ensuring all columns except the target are numeric for the model input
+train_data_matrix <- as.matrix(trainSet[, -which(names(trainSet) == "consumption_per_6hrs")] %>% select_if(function(col) is.numeric(col)))
+test_data_matrix <- as.matrix(testSet[, -which(names(testSet) == "consumption_per_6hrs")] %>% select_if(function(col) is.numeric(col)))
+
+# Loading required libraries
+library(xgboost)
+library(dplyr)
+
+# Training the XGBoost model
+model_xgb <- xgboost(
+  data = train_data_matrix,
+  label = trainSet$consumption_per_6hrs,
+  objective = "reg:squarederror",
+  nrounds = 100  # Number of boosting rounds; consider tuning this and other hyperparameters
+)
+
+# Predict on the test set
+predictions <- predict(model_xgb, test_data_matrix)
+
+# Calculate R-squared for the model's predictions
+rsquared <- 1 - (sum((predictions - testSet$consumption_per_6hrs)^2) / sum((mean(testSet$consumption_per_6hrs) - testSet$consumption_per_6hrs)^2))
+
+cat("R-squared:", rsquared, "\n")
+cat("Accuracy of XG BOOST with hyperparameters model is : ", rsquared * 100, "\n")
+
+```
+
+
+
+
