@@ -8,7 +8,7 @@ The purpose of this Analysis is to preemptively manage the expected increase in 
 - Predictive Modeling for Demand Forecasting 
 - Interactive Data Visualization with Shiny Apps 
 
-### Datasets Used:
+## Datasets Used:
 - Static House Data
 - Energy Usage Data
 - Weather Data
@@ -21,7 +21,7 @@ The purpose of this Analysis is to preemptively manage the expected increase in 
 - Comprehensive Data Integration - Merged county-level environmental data with detailed house-level data.
 - County Grouping and Data Summarization - Organized and summarized weather data across entire counties, focusing on total humidity and temperature.
 
-### Predictive models used:
+## Predictive models used:
 - Linear Regression Model
 - XGBoost Model
 
