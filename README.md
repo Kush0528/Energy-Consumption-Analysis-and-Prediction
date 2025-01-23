@@ -1,4 +1,4 @@
-# Energy-Consumption-Analysis-Prediction
+# Energy-Consumption-Analysis-and-Prediction
 ## Project Overview
 The purpose of this Analysis is to preemptively manage the expected increase in electricity demand during the summer months for the energy company (eSC) operating in South Carolina and parts of North Carolina and relieve the strain on the electrical grid during these high-demand periods without having to build new energy-generating facilities.The emphasis is on identifying the fundamental determinants that influence energy use, developing predictive models to forecast peak energy demand, and devising strategies to encourage energy saving among residential consumers.
 
